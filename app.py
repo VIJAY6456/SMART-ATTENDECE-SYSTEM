@@ -10,12 +10,26 @@ from io import BytesIO
 from PIL import Image
 
 app = Flask(__name__)
-ATTENDANCE_DIR = "attendance"
 
-with open("encodings/encodings.pkl", "rb") as f:
-    known_data = pickle.load(f)
-known_encodings = known_data["encodings"]
-known_names = known_data["names"]
+# Use the persistent disk path on Render if set, otherwise use local folders (for your PC)
+DATA_ROOT = os.environ.get("DATA_ROOT", ".")
+ATTENDANCE_DIR = os.path.join(DATA_ROOT, "attendance")
+DATASET_DIR = os.path.join(DATA_ROOT, "dataset")
+ENCODINGS_PATH = os.path.join(DATA_ROOT, "encodings", "encodings.pkl")
+
+os.makedirs(ATTENDANCE_DIR, exist_ok=True)
+os.makedirs(DATASET_DIR, exist_ok=True)
+os.makedirs(os.path.dirname(ENCODINGS_PATH), exist_ok=True)
+
+# Load known faces if the encodings file already exists, otherwise start empty
+if os.path.exists(ENCODINGS_PATH):
+    with open(ENCODINGS_PATH, "rb") as f:
+        known_data = pickle.load(f)
+    known_encodings = known_data["encodings"]
+    known_names = known_data["names"]
+else:
+    known_encodings = []
+    known_names = []
 
 def get_available_dates():
     if not os.path.exists(ATTENDANCE_DIR):
@@ -38,8 +52,6 @@ def read_attendance(date):
 def mark_attendance_live(person_id):
     today = datetime.now().strftime("%Y-%m-%d")
     file_path = os.path.join(ATTENDANCE_DIR, f"{today}.csv")
-    if not os.path.exists(ATTENDANCE_DIR):
-        os.makedirs(ATTENDANCE_DIR)
     if not os.path.exists(file_path):
         with open(file_path, "w", newline="") as f:
             csv.writer(f).writerow(["RollNo_Name", "Time"])
@@ -84,11 +96,12 @@ def recognize():
         return {"status": "no_face"}
 
     face_encoding = face_encodings[0]
+
+    if len(known_encodings) == 0:
+        return {"status": "no_match"}
+
     matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=0.5)
     face_distances = face_recognition.face_distance(known_encodings, face_encoding)
-
-    if len(face_distances) == 0:
-        return {"status": "no_match"}
 
     best_match_index = face_distances.argmin()
     if matches[best_match_index]:
@@ -113,7 +126,7 @@ def api_register():
         return {"status": "error", "message": "Missing name, roll number, or image"}
 
     person_id = f"{roll_no}_{name}"
-    person_dir = os.path.join("dataset", person_id)
+    person_dir = os.path.join(DATASET_DIR, person_id)
     if not os.path.exists(person_dir):
         os.makedirs(person_dir)
 
@@ -138,8 +151,8 @@ def finalize_registration():
     known_encodings_new = []
     known_names_new = []
 
-    for person_folder in os.listdir("dataset"):
-        person_path = os.path.join("dataset", person_folder)
+    for person_folder in os.listdir(DATASET_DIR):
+        person_path = os.path.join(DATASET_DIR, person_folder)
         if not os.path.isdir(person_path):
             continue
         for image_name in os.listdir(person_path):
@@ -151,7 +164,7 @@ def finalize_registration():
                 known_encodings_new.append(encoding)
                 known_names_new.append(person_folder)
 
-    with open("encodings/encodings.pkl", "wb") as f:
+    with open(ENCODINGS_PATH, "wb") as f:
         pickle.dump({"encodings": known_encodings_new, "names": known_names_new}, f)
 
     global known_encodings, known_names
@@ -161,4 +174,4 @@ def finalize_registration():
     return {"status": "done", "total_people": len(set(known_names_new))}
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
