@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Register Face</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #f4f4f4; padding: 30px; }
+        video, canvas { border-radius: 10px; }
+        input { padding: 8px; font-size: 16px; margin: 5px; width: 200px; }
+        button { padding: 10px 20px; font-size: 16px; margin-top: 15px; cursor: pointer; }
+        #status { font-size: 18px; margin-top: 15px; font-weight: bold; }
+        .success { color: #2e7d32; }
+        .warn { color: #ef6c00; }
+        .error { color: #c62828; }
+        #progress { font-size: 16px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>📝 Register Your Face</h1>
+
+    <div>
+        <input type="text" id="name" placeholder="Full Name"><br>
+        <input type="text" id="rollNo" placeholder="Roll Number">
+    </div>
+
+    <br>
+    <video id="video" width="400" height="300" autoplay></video>
+    <canvas id="canvas" width="400" height="300" style="display:none;"></canvas>
+    <br>
+
+    <button id="captureBtn">📸 Capture Photo</button>
+    <button id="finishBtn" style="display:none;">✅ Finish Registration</button>
+
+    <p id="progress">0 photos captured (need at least 5)</p>
+    <p id="status"></p>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+        const progressEl = document.getElementById('progress');
+        const captureBtn = document.getElementById('captureBtn');
+        const finishBtn = document.getElementById('finishBtn');
+
+        let capturedCount = 0;
+        const MIN_PHOTOS = 5;
+
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => { video.srcObject = stream; })
+            .catch(() => {
+                statusEl.textContent = "Camera access denied.";
+                statusEl.className = "error";
+            });
+
+        captureBtn.addEventListener('click', () => {
+            const name = document.getElementById('name').value.trim();
+            const rollNo = document.getElementById('rollNo').value.trim();
+
+            if (!name || !rollNo) {
+                statusEl.textContent = "Please enter your name and roll number first.";
+                statusEl.className = "error";
+                return;
+            }
+
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/jpeg');
+
+            fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, roll_no: rollNo, image: imageData })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "captured") {
+                    capturedCount = data.count;
+                    statusEl.textContent = `Photo ${capturedCount} captured!`;
+                    statusEl.className = "success";
+                    progressEl.textContent = `${capturedCount} photos captured (need at least ${MIN_PHOTOS})`;
+                    if (capturedCount >= MIN_PHOTOS) {
+                        finishBtn.style.display = "inline-block";
+                    }
+                } else if (data.status === "no_face") {
+                    statusEl.textContent = "No face detected — face the camera clearly.";
+                    statusEl.className = "warn";
+                } else {
+                    statusEl.textContent = data.message || "Something went wrong.";
+                    statusEl.className = "error";
+                }
+            });
+        });
+
+        finishBtn.addEventListener('click', () => {
+            statusEl.textContent = "Processing... this may take a moment.";
+            statusEl.className = "warn";
+            fetch('/api/finalize_registration', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    statusEl.textContent = `✅ Registration complete! Total people registered: ${data.total_people}`;
+                    statusEl.className = "success";
+                    captureBtn.disabled = true;
+                    finishBtn.disabled = true;
+                });
+        });
+    </script>
+</body>
+</html>

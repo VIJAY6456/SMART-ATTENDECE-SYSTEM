@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mark Attendance</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #f4f4f4; padding: 30px; }
+        video, canvas { border-radius: 10px; }
+        #status { font-size: 22px; margin-top: 20px; font-weight: bold; }
+        .success { color: #2e7d32; }
+        .warn { color: #ef6c00; }
+        .error { color: #c62828; }
+    </style>
+</head>
+<body>
+    <h1>📷 Mark Your Attendance</h1>
+    <video id="video" width="480" height="360" autoplay></video>
+    <canvas id="canvas" width="480" height="360" style="display:none;"></canvas>
+    <p id="status">Starting camera...</p>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const statusEl = document.getElementById('status');
+        const context = canvas.getContext('2d');
+
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+                statusEl.textContent = "Look at the camera...";
+                setInterval(captureAndSend, 2000); // every 2 seconds
+            })
+            .catch(err => {
+                statusEl.textContent = "Camera access denied or unavailable.";
+                statusEl.className = "error";
+            });
+
+        function captureAndSend() {
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/jpeg');
+
+            fetch('/api/recognize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: imageData })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "marked") {
+                    statusEl.textContent = `✅ Attendance marked for ${data.name}`;
+                    statusEl.className = "success";
+                } else if (data.status === "already_marked") {
+                    statusEl.textContent = `ℹ️ ${data.name} already marked today`;
+                    statusEl.className = "warn";
+                } else if (data.status === "no_face") {
+                    statusEl.textContent = "No face detected. Look at the camera.";
+                    statusEl.className = "warn";
+                } else {
+                    statusEl.textContent = "Face not recognized.";
+                    statusEl.className = "error";
+                }
+            });
+        }
+    </script>
+</body>
+</html>
